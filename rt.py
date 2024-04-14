@@ -12,6 +12,7 @@ import os
 import os.path as op
 import code
 import json
+import re
 import time
 import datetime
 import torch
@@ -53,59 +54,37 @@ transform_visualize = transforms.Compose([
                     transforms.CenterCrop(224),
                     transforms.ToTensor()])
 
-def run_inference(args, image_list, Graphormer_model, mano, renderer, mesh_sampler):
-# switch to evaluate mode
-    Graphormer_model.eval()
-    mano.eval()
+def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
     with torch.no_grad():
-        for image_file in image_list:
-            if 'pred' not in image_file:
-                att_all = []
-                print(image_file)
-                img = Image.open(image_file)
-                img_tensor = transform(img)
-                img_visual = transform_visualize(img)
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img)
+        img_tensor = transform(img)
+        img_visual = transform_visualize(img)
 
-                batch_imgs = torch.unsqueeze(img_tensor, 0).cuda()
-                batch_visual_imgs = torch.unsqueeze(img_visual, 0).cuda()
-                # forward-pass
-                pred_camera, pred_3d_joints, pred_vertices_sub, pred_vertices, hidden_states, att = Graphormer_model(batch_imgs, mano, mesh_sampler)
-                # obtain 3d joints from full mesh
-                pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
-                pred_3d_pelvis = pred_3d_joints_from_mesh[:,cfg.J_NAME.index('Wrist'),:]
-                pred_3d_joints_from_mesh = pred_3d_joints_from_mesh - pred_3d_pelvis[:, None, :]
-                pred_vertices = pred_vertices - pred_3d_pelvis[:, None, :]
+        batch_imgs = torch.unsqueeze(img_tensor, 0).cuda()
+        batch_visual_imgs = torch.unsqueeze(img_visual, 0).cuda()
+        # forward-pass
+        pred_camera, pred_3d_joints, pred_vertices_sub, pred_vertices, hidden_states, att = Graphormer_model(batch_imgs, mano, mesh_sampler)
+        # obtain 3d joints from full mesh
+        pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
+        pred_3d_pelvis = pred_3d_joints_from_mesh[:,cfg.J_NAME.index('Wrist'),:]
+        pred_3d_joints_from_mesh = pred_3d_joints_from_mesh - pred_3d_pelvis[:, None, :]
+        pred_vertices = pred_vertices - pred_3d_pelvis[:, None, :]
 
-                # save attantion
-                att_max_value = att[-1]
-                att_cpu = np.asarray(att_max_value.cpu().detach())
-                att_all.append(att_cpu)
+        # obtain 3d joints, which are regressed from the full mesh
+        pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
 
-                # obtain 3d joints, which are regressed from the full mesh
-                pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
-                print(pred_3d_joints_from_mesh.shape, pred_3d_joints_from_mesh)
-                # obtain 2d joints, which are projected from 3d joints of mesh
-                pred_2d_joints_from_mesh = orthographic_projection(pred_3d_joints_from_mesh.contiguous(), pred_camera.contiguous())
-                pred_2d_coarse_vertices_from_mesh = orthographic_projection(pred_vertices_sub.contiguous(), pred_camera.contiguous())
+        visual_imgs_output = visualize_mesh(renderer, 
+                                            batch_visual_imgs[0], 
+                                            pred_vertices[0].detach(), 
+                                            pred_camera.detach())
 
+        visual_imgs = visual_imgs_output.transpose(1,2,0)
+        visual_imgs = np.asarray(visual_imgs)
+        # print(np.asarray(visual_imgs[:,:,::-1]).shape)
 
-                visual_imgs_output = visualize_mesh( renderer, batch_visual_imgs[0],
-                                                            pred_vertices[0].detach(), 
-                                                            pred_camera.detach())
-                # visual_imgs_output = visualize_mesh_and_attention( renderer, batch_visual_imgs[0],
-                #                                             pred_vertices[0].detach(), 
-                #                                             pred_vertices_sub[0].detach(), 
-                #                                             pred_2d_coarse_vertices_from_mesh[0].detach(),
-                #                                             pred_2d_joints_from_mesh[0].detach(),
-                #                                             pred_camera.detach(),
-                #                                             att[-1][0].detach())
-                visual_imgs = visual_imgs_output.transpose(1,2,0)
-                visual_imgs = np.asarray(visual_imgs)
-                        
-                temp_fname = image_file[:-4] + '_graphormer_pred.jpg'
-                print('save to ', temp_fname)
-                cv2.imwrite(temp_fname, np.asarray(visual_imgs[:,:,::-1]*255))
-    return
+    return visual_imgs[:,:,::-1]
+    # return np.asarray(visual_imgs[:,:,::-1]*255).astype(np.uint8)
 
 def visualize_mesh( renderer, images,
                     pred_vertices_full,
@@ -315,21 +294,32 @@ def main(args):
 
     _model.to(args.device)
     logger.info("Run inference")
+    
 
-    image_list = []
-    if not args.image_file_or_path:
-        raise ValueError("image_file_or_path not specified")
-    if op.isfile(args.image_file_or_path):
-        image_list = [args.image_file_or_path]
-    elif op.isdir(args.image_file_or_path):
-        # should be a path with images only
-        for filename in os.listdir(args.image_file_or_path):
-            if filename.endswith(".png") or filename.endswith(".jpg") and 'pred' not in filename:
-                image_list.append(args.image_file_or_path+'/'+filename) 
-    else:
-        raise ValueError("Cannot find images at {}".format(args.image_file_or_path))
+    _model.eval()
+    mano_model.eval()
 
-    run_inference(args, image_list, _model, mano_model, renderer, mesh_sampler)    
+    # frame = cv2.imread(args.image_file_or_path)
+    # visual_imgs = inference(frame, _model, mano_model, renderer, mesh_sampler)
+    # cv2.imwrite('result.png', np.asarray(visual_imgs*255))
+
+    # open camera and start real-time inference
+    cap = cv2.VideoCapture(4)
+    
+    while True:
+        ret, frame = cap.read()
+        if ret == False:
+            print("Error in reading video stream or file")
+            break
+
+        # real-time inference
+        visual_imgs = inference(frame, _model, mano_model, renderer, mesh_sampler)
+        cv2.imwrite('result.png', np.asarray(visual_imgs*255))
+        cv2.imshow('frame', visual_imgs)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    cv2.destroyAllWindows()
+    cap.release()
 
 if __name__ == "__main__":
     args = parse_args()
