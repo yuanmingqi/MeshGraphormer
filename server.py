@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 
 def server_program():
-    host = socket.gethostname()
+    host = '192.168.1.1'
     port = 5000
 
     server_socket = socket.socket()
