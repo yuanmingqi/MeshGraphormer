@@ -1,8 +1,10 @@
 import socket
-import pickle
-import numpy as np
+import cv2
 
-def server_program():
+from realtime import build_model, inference, parse_args
+
+if __name__ == '__main__':
+    # socket
     host = '192.168.1.1'
     port = 5000
 
@@ -11,20 +13,45 @@ def server_program():
 
     server_socket.listen(2)
     conn, address = server_socket.accept()
+    conn.settimeout(60)
     print("Connected to: " + str(address))
+    # arguments
+    args = parse_args()
+    # create model, renderer and mesh sampler
+    _model, mano_model, renderer, mesh_sampler = build_model(args)
+    # open camera and start real-time inference
+    cap = cv2.VideoCapture(4)
+    
+    while True:
+        ret, frame = cap.read()
+        if ret == False:
+            print("Error in reading video stream or file")
+            break
 
-    try:
-        while True:
-            # 创建一个随机大小的NumPy数组
-            size = np.random.randint(10, 20)
-            array = np.random.randint(0, 100, size)
-            data = pickle.dumps(array)  # 序列化数组
+        # real-time inference
+        visual_imgs, joints_pos = inference(frame, _model, mano_model, renderer, mesh_sampler)
+        # send data
+        # try:
+        #     data = joints_pos.tobytes()
+        #     conn.send(data)  # 发送序列化的数组
+        #     print(f"Sent array: {joints_pos}")
+        # # except socket.error as e:
+        #     # print("Client disconnected or error:", e)
+        # except socket.timeout:
+        #     print("Timeout")
+        # finally:
+        #     conn.close()
+
+        try:
+            data = joints_pos.tobytes()
             conn.send(data)  # 发送序列化的数组
-            print(f"Sent array: {array}")
-    except socket.error as e:
-        print("Client disconnected or error:", e)
-    finally:
-        conn.close()
+            print(f"Sent array: {joints_pos}")
+        except socket.timeout:
+            pass
 
-if __name__ == '__main__':
-    server_program()
+        cv2.imshow('frame', visual_imgs)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+    cap.release()
