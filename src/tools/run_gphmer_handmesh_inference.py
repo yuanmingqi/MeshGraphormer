@@ -14,6 +14,7 @@ import code
 import json
 import time
 import datetime
+from matplotlib.pyplot import pink
 import torch
 import torchvision.models as models
 from torchvision.utils import make_grid
@@ -83,22 +84,28 @@ def run_inference(args, image_list, Graphormer_model, mano, renderer, mesh_sampl
 
                 # obtain 3d joints, which are regressed from the full mesh
                 pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
-                print(pred_3d_joints_from_mesh.shape, pred_3d_joints_from_mesh)
+                # print(pred_3d_joints_from_mesh.shape, pred_3d_joints_from_mesh)
+                np.savez(f'{image_file[:-4]}_mesh.npz', 
+                         joints=pred_3d_joints_from_mesh.cpu().numpy(), 
+                         vertices=pred_vertices.cpu().numpy(), 
+                         camera=pred_camera.cpu().numpy()
+                         )
                 # obtain 2d joints, which are projected from 3d joints of mesh
                 pred_2d_joints_from_mesh = orthographic_projection(pred_3d_joints_from_mesh.contiguous(), pred_camera.contiguous())
                 pred_2d_coarse_vertices_from_mesh = orthographic_projection(pred_vertices_sub.contiguous(), pred_camera.contiguous())
 
 
-                visual_imgs_output = visualize_mesh( renderer, batch_visual_imgs[0],
-                                                            pred_vertices[0].detach(), 
-                                                            pred_camera.detach())
-                # visual_imgs_output = visualize_mesh_and_attention( renderer, batch_visual_imgs[0],
+                # visual_imgs_output = visualize_mesh( renderer, batch_visual_imgs[0],
                 #                                             pred_vertices[0].detach(), 
-                #                                             pred_vertices_sub[0].detach(), 
-                #                                             pred_2d_coarse_vertices_from_mesh[0].detach(),
-                #                                             pred_2d_joints_from_mesh[0].detach(),
-                #                                             pred_camera.detach(),
-                #                                             att[-1][0].detach())
+                #                                             pred_camera.detach())
+                visual_imgs_output = visualize_mesh_and_attention( renderer, batch_visual_imgs[0],
+                                                            pred_vertices[0].detach(), 
+                                                            pred_vertices_sub[0].detach(), 
+                                                            pred_2d_coarse_vertices_from_mesh[0].detach(),
+                                                            pred_2d_joints_from_mesh[0].detach(),
+                                                            pred_camera.detach(),
+                                                            att[-1][0].detach())
+
                 visual_imgs = visual_imgs_output.transpose(1,2,0)
                 visual_imgs = np.asarray(visual_imgs)
                         

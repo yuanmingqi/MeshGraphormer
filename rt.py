@@ -13,8 +13,10 @@ import os.path as op
 import code
 import json
 import re
+from shlex import join
 import time
 import datetime
+import matplotlib.pyplot as plt
 import torch
 import torchvision.models as models
 from torchvision.utils import make_grid
@@ -74,6 +76,18 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
         # obtain 3d joints, which are regressed from the full mesh
         pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
 
+        # print('wrist:', pred_3d_joints_from_mesh[0][0], 'index:', pred_3d_joints_from_mesh[0][8])
+        print('index:', pred_3d_joints_from_mesh[0][8])
+
+    #     skeleton_fig = show_skeleton(pred_3d_joints_from_mesh.cpu().numpy()[0])
+    #     skeleton_fig.canvas.draw()
+    #     img = np.fromstring(skeleton_fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+    #     img = img.reshape(skeleton_fig.canvas.get_width_height()[::-1] + (3,))
+    #     # print(img.shape)
+    #     # quit(0)
+    
+    # return img
+
         visual_imgs_output = visualize_mesh(renderer, 
                                             batch_visual_imgs[0], 
                                             pred_vertices[0].detach(), 
@@ -81,10 +95,8 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
 
         visual_imgs = visual_imgs_output.transpose(1,2,0)
         visual_imgs = np.asarray(visual_imgs)
-        # print(np.asarray(visual_imgs[:,:,::-1]).shape)
 
     return visual_imgs[:,:,::-1]
-    # return np.asarray(visual_imgs[:,:,::-1]*255).astype(np.uint8)
 
 def visualize_mesh( renderer, images,
                     pred_vertices_full,
@@ -134,8 +146,8 @@ def parse_args():
     #########################################################
     parser.add_argument("--model_name_or_path", default='src/modeling/bert/bert-base-uncased/', type=str, required=False,
                         help="Path to pre-trained transformer model or model type.")
-    parser.add_argument("--resume_checkpoint", default=None, type=str, required=False,
-                        help="Path to specific checkpoint for resume training.")
+    parser.add_argument("--resume_checkpoint", default="./models/graphormer_release/graphormer_hand_state_dict.bin", 
+                        type=str, required=False, help="Path to specific checkpoint for resume training.")
     parser.add_argument("--output_dir", default='output/', type=str, required=False,
                         help="The output directory to save checkpoint and test results.")
     parser.add_argument("--config_name", default="", type=str, 
@@ -173,6 +185,32 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def show_skeleton(joints):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    joints = joints * -1
+    bones = [
+        (0, 1), (1, 2), (2, 3), (3, 4),  # 拇指
+        (0, 5), (5, 6), (6, 7), (7, 8),  # 食指
+        (0, 9), (9, 10), (10, 11), (11, 12),  # 中指
+        (0, 13), (13, 14), (14, 15), (15, 16),  # 无名指
+        (0, 17), (17, 18), (18, 19), (19, 20)  # 小指
+    ]
+
+    ax.scatter(joints[:, 0], joints[:, 1], joints[:, 2])
+
+    # 画线
+    for bone in bones:
+        points = joints[list(bone), :]
+        ax.plot(points[:, 0], points[:, 1], points[:, 2], 'r')
+    
+    ax.set_xlabel('X Label')
+    ax.set_ylabel('Y Label')
+    ax.set_zlabel('Z Label')
+
+    return fig
+
+
 def main(args):
     global logger
     # Setup CUDA, GPU & distributed training
@@ -203,84 +241,66 @@ def main(args):
     # which encoder block to have graph convs
     which_blk_graph = [int(item) for item in args.which_gcn.split(',')]
 
-    if args.run_eval_only==True and args.resume_checkpoint!=None and args.resume_checkpoint!='None' and 'state_dict' not in args.resume_checkpoint:
-        # if only run eval, load checkpoint
-        logger.info("Evaluation: Loading from checkpoint {}".format(args.resume_checkpoint))
-        _model = torch.load(args.resume_checkpoint)
+    # init three transformer-encoder blocks in a loop
+    for i in range(len(output_feat_dim)):
+        config_class, model_class = BertConfig, Graphormer
+        config = config_class.from_pretrained(args.config_name if args.config_name \
+                else args.model_name_or_path)
 
-    else:
-        # init three transformer-encoder blocks in a loop
-        for i in range(len(output_feat_dim)):
-            config_class, model_class = BertConfig, Graphormer
-            config = config_class.from_pretrained(args.config_name if args.config_name \
-                    else args.model_name_or_path)
+        config.output_attentions = False
+        config.img_feature_dim = input_feat_dim[i] 
+        config.output_feature_dim = output_feat_dim[i]
+        args.hidden_size = hidden_feat_dim[i]
+        args.intermediate_size = int(args.hidden_size*2)
 
-            config.output_attentions = False
-            config.img_feature_dim = input_feat_dim[i] 
-            config.output_feature_dim = output_feat_dim[i]
-            args.hidden_size = hidden_feat_dim[i]
-            args.intermediate_size = int(args.hidden_size*2)
-
-            if which_blk_graph[i]==1:
-                config.graph_conv = True
-                logger.info("Add Graph Conv")
-            else:
-                config.graph_conv = False
-
-            config.mesh_type = args.mesh_type
-
-            # update model structure if specified in arguments
-            update_params = ['num_hidden_layers', 'hidden_size', 'num_attention_heads', 'intermediate_size']
-            for idx, param in enumerate(update_params):
-                arg_param = getattr(args, param)
-                config_param = getattr(config, param)
-                if arg_param > 0 and arg_param != config_param:
-                    logger.info("Update config parameter {}: {} -> {}".format(param, config_param, arg_param))
-                    setattr(config, param, arg_param)
-
-            # init a transformer encoder and append it to a list
-            assert config.hidden_size % config.num_attention_heads == 0
-            model = model_class(config=config) 
-            logger.info("Init model from scratch.")
-            trans_encoder.append(model)
-        
-        # create backbone model
-        if args.arch=='hrnet':
-            hrnet_yaml = 'models/hrnet/cls_hrnet_w40_sgd_lr5e-2_wd1e-4_bs32_x100.yaml'
-            hrnet_checkpoint = 'models/hrnet/hrnetv2_w40_imagenet_pretrained.pth'
-            hrnet_update_config(hrnet_config, hrnet_yaml)
-            backbone = get_cls_net_gridfeat(hrnet_config, pretrained=hrnet_checkpoint)
-            logger.info('=> loading hrnet-v2-w40 model')
-        elif args.arch=='hrnet-w64':
-            hrnet_yaml = 'models/hrnet/cls_hrnet_w64_sgd_lr5e-2_wd1e-4_bs32_x100.yaml'
-            hrnet_checkpoint = 'models/hrnet/hrnetv2_w64_imagenet_pretrained.pth'
-            hrnet_update_config(hrnet_config, hrnet_yaml)
-            backbone = get_cls_net_gridfeat(hrnet_config, pretrained=hrnet_checkpoint)
-            logger.info('=> loading hrnet-v2-w64 model')
+        if which_blk_graph[i]==1:
+            config.graph_conv = True
+            logger.info("Add Graph Conv")
         else:
-            print("=> using pre-trained model '{}'".format(args.arch))
-            backbone = models.__dict__[args.arch](pretrained=True)
-            # remove the last fc layer
-            backbone = torch.nn.Sequential(*list(backbone.children())[:-1])
+            config.graph_conv = False
 
-        trans_encoder = torch.nn.Sequential(*trans_encoder)
-        total_params = sum(p.numel() for p in trans_encoder.parameters())
-        logger.info('Graphormer encoders total parameters: {}'.format(total_params))
-        backbone_total_params = sum(p.numel() for p in backbone.parameters())
-        logger.info('Backbone total parameters: {}'.format(backbone_total_params))
+        config.mesh_type = args.mesh_type
 
-        # build end-to-end Graphormer network (CNN backbone + multi-layer Graphormer encoder)
-        _model = Graphormer_Network(args, config, backbone, trans_encoder)
+        # update model structure if specified in arguments
+        update_params = ['num_hidden_layers', 'hidden_size', 'num_attention_heads', 'intermediate_size']
+        for idx, param in enumerate(update_params):
+            arg_param = getattr(args, param)
+            config_param = getattr(config, param)
+            if arg_param > 0 and arg_param != config_param:
+                logger.info("Update config parameter {}: {} -> {}".format(param, config_param, arg_param))
+                setattr(config, param, arg_param)
 
-        if args.resume_checkpoint!=None and args.resume_checkpoint!='None':
-            # for fine-tuning or resume training or inference, load weights from checkpoint
-            logger.info("Loading state dict from checkpoint {}".format(args.resume_checkpoint))
-            # workaround approach to load sparse tensor in graph conv.
-            state_dict = torch.load(args.resume_checkpoint)
-            _model.load_state_dict(state_dict, strict=False)
-            del state_dict
-            gc.collect()
-            torch.cuda.empty_cache()
+        # init a transformer encoder and append it to a list
+        assert config.hidden_size % config.num_attention_heads == 0
+        model = model_class(config=config) 
+        logger.info("Init model from scratch.")
+        trans_encoder.append(model)
+        
+    # create backbone model
+    hrnet_yaml = 'models/hrnet/cls_hrnet_w64_sgd_lr5e-2_wd1e-4_bs32_x100.yaml'
+    hrnet_checkpoint = 'models/hrnet/hrnetv2_w64_imagenet_pretrained.pth'
+    hrnet_update_config(hrnet_config, hrnet_yaml)
+    backbone = get_cls_net_gridfeat(hrnet_config, pretrained=hrnet_checkpoint)
+    logger.info('=> loading hrnet-v2-w64 model')
+
+    trans_encoder = torch.nn.Sequential(*trans_encoder)
+    total_params = sum(p.numel() for p in trans_encoder.parameters())
+    logger.info('Graphormer encoders total parameters: {}'.format(total_params))
+    backbone_total_params = sum(p.numel() for p in backbone.parameters())
+    logger.info('Backbone total parameters: {}'.format(backbone_total_params))
+
+    # build end-to-end Graphormer network (CNN backbone + multi-layer Graphormer encoder)
+    _model = Graphormer_Network(args, config, backbone, trans_encoder)
+
+    if args.resume_checkpoint!=None and args.resume_checkpoint!='None':
+        # for fine-tuning or resume training or inference, load weights from checkpoint
+        logger.info("Loading state dict from checkpoint {}".format(args.resume_checkpoint))
+        # workaround approach to load sparse tensor in graph conv.
+        state_dict = torch.load(args.resume_checkpoint)
+        _model.load_state_dict(state_dict, strict=False)
+        del state_dict
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # update configs to enable attention outputs
     setattr(_model.trans_encoder[-1].config,'output_attentions', True)
@@ -314,7 +334,7 @@ def main(args):
 
         # real-time inference
         visual_imgs = inference(frame, _model, mano_model, renderer, mesh_sampler)
-        cv2.imwrite('result.png', np.asarray(visual_imgs*255))
+        # cv2.imwrite('result.png', np.asarray(visual_imgs*255))
         cv2.imshow('frame', visual_imgs)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
