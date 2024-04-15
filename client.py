@@ -9,12 +9,18 @@ def client_program():
     client_socket = socket.socket()  # instantiate
     client_socket.connect((host, port))  # connect to the server
 
-    # 接收数据
-    data = client_socket.recv(4096)  # 可能需要调整缓冲区大小
-    array = pickle.loads(data)  # 反序列化数据
-    print('Received array:', array)
-
-    client_socket.close()  # close the connection
+    try:
+        while True:
+            data = client_socket.recv(4096)  # 接收数据
+            if not data:
+                break  # 如果没有数据，结束循环
+            array = pickle.loads(data)  # 反序列化数据
+            print('Received array:', array)
+    except socket.error as e:
+        print("Error receiving data:", e)
+    finally:
+        client_socket.close()  # close the connection
+        print("Connection closed.")
 
 if __name__ == '__main__':
     client_program()
