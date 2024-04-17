@@ -8,6 +8,7 @@ End-to-end inference codes for
 
 from __future__ import absolute_import, division, print_function
 import argparse
+import array
 import os
 import os.path as op
 import code
@@ -39,6 +40,7 @@ from src.utils.metric_logger import AverageMeter
 from src.utils.renderer import Renderer, visualize_reconstruction_and_att_local, visualize_reconstruction_no_text
 from src.utils.metric_pampjpe import reconstruction_error
 from src.utils.geometric_layers import orthographic_projection
+from filter import initialize_kalman_filter, update_kalman_filter
 
 from PIL import Image
 from torchvision import transforms
@@ -55,6 +57,8 @@ transform_visualize = transforms.Compose([
                     transforms.Resize(224),
                     transforms.CenterCrop(224),
                     transforms.ToTensor()])
+
+kf = initialize_kalman_filter()
 
 def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
     with torch.no_grad():
@@ -76,8 +80,27 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
         # obtain 3d joints, which are regressed from the full mesh
         pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
 
-        # print('wrist:', pred_3d_joints_from_mesh[0][0], 'index:', pred_3d_joints_from_mesh[0][8])
-        print('index:', pred_3d_joints_from_mesh[0][8])
+        # joints_xyz = pred_3d_joints_from_mesh[0].cpu().numpy().round(4)
+
+        # print('index', joints_xyz[8], 'KF', update_kalman_filter(kf, joints_xyz[8]))
+        
+        # print('wrist:', pred_3d_joints_from_mesh[0][0])
+        # print('index:', pred_3d_joints_from_mesh[0][8])
+        # print('wrist', joints_xyz[0], 'index', joints_xyz[8])
+
+        joints_xyz = pred_3d_joints_from_mesh[0].cpu().numpy()
+
+        # get angle between index and middle finger
+        index_vec = joints_xyz[8] - joints_xyz[5]
+        middle_vec = joints_xyz[12] - joints_xyz[9]
+        # get degree between index and middle finger
+        dot = np.dot(index_vec, middle_vec)
+        norm = np.linalg.norm(index_vec) * np.linalg.norm(middle_vec)
+        cos = dot / norm
+        angle_index_middle = np.degrees(np.arccos(cos))
+        array = joints_xyz[8].tolist() # index finger tip joint
+        array.append(angle_index_middle)
+        print(array)
 
     #     skeleton_fig = show_skeleton(pred_3d_joints_from_mesh.cpu().numpy()[0])
     #     skeleton_fig.canvas.draw()

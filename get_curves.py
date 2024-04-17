@@ -39,6 +39,7 @@ from src.utils.metric_logger import AverageMeter
 from src.utils.renderer import Renderer, visualize_reconstruction_and_att_local, visualize_reconstruction_no_text
 from src.utils.metric_pampjpe import reconstruction_error
 from src.utils.geometric_layers import orthographic_projection
+from filter import initialize_kalman_filter, update_kalman_filter
 
 from PIL import Image
 from torchvision import transforms
@@ -55,6 +56,8 @@ transform_visualize = transforms.Compose([
                     transforms.Resize(224),
                     transforms.CenterCrop(224),
                     transforms.ToTensor()])
+
+kf = initialize_kalman_filter()
 
 def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
     with torch.no_grad():
@@ -75,17 +78,8 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
 
         # obtain 3d joints, which are regressed from the full mesh
         pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
-        joints_xyz = pred_3d_joints_from_mesh[0].cpu().numpy()
 
-        # get angle between index and middle finger
-        index_vec = joints_xyz[8] - joints_xyz[5]
-        middle_vec = joints_xyz[12] - joints_xyz[9]
-        # get degree between index and middle finger
-        dot = np.dot(index_vec, middle_vec)
-        norm = np.linalg.norm(index_vec) * np.linalg.norm(middle_vec)
-        cos = dot / norm
-        angle_index_middle = np.degrees(np.arccos(cos))
-        print(joints_xyz[8].tolist().append(angle_index_middle))
+        joints_xyz = pred_3d_joints_from_mesh[0].cpu().numpy().round(4)
 
         visual_imgs_output = visualize_mesh(renderer, 
                                             batch_visual_imgs[0], 
@@ -95,7 +89,7 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
         visual_imgs = visual_imgs_output.transpose(1,2,0)
         visual_imgs = np.asarray(visual_imgs)
 
-    return visual_imgs[:,:,::-1], pred_3d_joints_from_mesh.cpu().numpy()[0], angle_index_middle
+    return visual_imgs[:,:,::-1], joints_xyz
 
 def visualize_mesh( renderer, images,
                     pred_vertices_full,
@@ -210,7 +204,7 @@ def show_skeleton(joints):
     return fig
 
 
-def build_model(args):
+def main(args):
     global logger
     # Setup CUDA, GPU & distributed training
     args.num_gpus = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
@@ -313,5 +307,35 @@ def build_model(args):
 
     _model.to(args.device)
     logger.info("Run inference")
+    
 
-    return _model.eval(), mano_model.eval(), renderer, mesh_sampler
+    _model.eval()
+    mano_model.eval()
+
+    # frame = cv2.imread(args.image_file_or_path)
+    # visual_imgs = inference(frame, _model, mano_model, renderer, mesh_sampler)
+    # cv2.imwrite('result.png', np.asarray(visual_imgs*255))
+
+    # open camera and start real-time inference
+    cap = cv2.VideoCapture(4)
+    all_joints = []
+    while True:
+        ret, frame = cap.read()
+        if ret == False:
+            print("Error in reading video stream or file")
+            break
+
+        # real-time inference
+        visual_imgs, joints_xyz = inference(frame, _model, mano_model, renderer, mesh_sampler)
+        all_joints.append(joints_xyz)
+        # cv2.imwrite('result.png', np.asarray(visual_imgs*255))
+        cv2.imshow('frame', visual_imgs)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            np.save('data/joints.npy', np.array(all_joints))
+            break
+    cv2.destroyAllWindows()
+    cap.release()
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)

@@ -1,5 +1,7 @@
+import array
 import socket
 import cv2
+import numpy as np
 
 from realtime import build_model, inference, parse_args
 
@@ -29,7 +31,7 @@ if __name__ == '__main__':
             break
 
         # real-time inference
-        visual_imgs, joints_pos = inference(frame, _model, mano_model, renderer, mesh_sampler)
+        visual_imgs, joints_xyz, angle_index_middle = inference(frame, _model, mano_model, renderer, mesh_sampler)
         # send data
         # try:
         #     data = joints_pos.tobytes()
@@ -43,9 +45,12 @@ if __name__ == '__main__':
         #     conn.close()
 
         try:
-            data = joints_pos.tobytes()
+            array = joints_xyz[8].tolist() # index finger tip joint
+            array.append(angle_index_middle)
+            array = np.array(array).astype(np.float32)
+            data = array.tobytes()
             conn.send(data)  # 发送序列化的数组
-            print(f"Sent array: {joints_pos}")
+            print(f"Sent array: {array}")
         except socket.timeout:
             pass
 
