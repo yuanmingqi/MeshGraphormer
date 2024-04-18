@@ -41,17 +41,32 @@ def update_kalman_filter(kf, measurement):
     kf.update(measurement)
     return kf.x[:3]  # 返回位置估计
 
-# 初始化滤波器
-kf = initialize_kalman_filter()
+# # 初始化滤波器
+# kf = initialize_kalman_filter()
 
-# 示例观测数据（实际使用中需要从3D建模系统获取）
-measurements = [
-    np.array([0.1, 0.2, 0.3]),
-    np.array([0.4, 0.5, 0.6]),
-    np.array([0.7, 0.8, 0.9])
-]
+# # 示例观测数据（实际使用中需要从3D建模系统获取）
+# measurements = [
+#     np.array([0.1, 0.2, 0.3]),
+#     np.array([0.4, 0.5, 0.6]),
+#     np.array([0.7, 0.8, 0.9])
+# ]
 
-# 处理每个观测
-for measurement in measurements:
-    estimate = update_kalman_filter(kf, measurement)
-    print("Estimate:", estimate)
+# # 处理每个观测
+# for measurement in measurements:
+#     estimate = update_kalman_filter(kf, measurement)
+#     print("Estimate:", estimate)
+
+from collections import deque
+
+class MovingAverage:
+    def __init__(self, window_size=10):
+        self.window_size = window_size
+        self.window = deque(maxlen=window_size)
+        self.sum = 0
+
+    def update(self, new_value):
+        if len(self.window) == self.window_size:
+            self.sum -= self.window.popleft()
+        self.window.append(new_value)
+        self.sum += new_value
+        return self.sum / len(self.window)

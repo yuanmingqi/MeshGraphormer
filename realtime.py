@@ -56,7 +56,7 @@ transform_visualize = transforms.Compose([
                     transforms.CenterCrop(224),
                     transforms.ToTensor()])
 
-def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
+def inference(frame, Graphormer_model, mano, renderer, mesh_sampler, display=True):
     with torch.no_grad():
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img)
@@ -77,25 +77,18 @@ def inference(frame, Graphormer_model, mano, renderer, mesh_sampler):
         pred_3d_joints_from_mesh = mano.get_3d_joints(pred_vertices)
         joints_xyz = pred_3d_joints_from_mesh[0].cpu().numpy()
 
-        # get angle between index and middle finger
-        index_vec = joints_xyz[8] - joints_xyz[5]
-        middle_vec = joints_xyz[12] - joints_xyz[9]
-        # get degree between index and middle finger
-        dot = np.dot(index_vec, middle_vec)
-        norm = np.linalg.norm(index_vec) * np.linalg.norm(middle_vec)
-        cos = dot / norm
-        angle_index_middle = np.degrees(np.arccos(cos))
-        print(joints_xyz[8].tolist().append(angle_index_middle))
+        if display:
+            visual_imgs_output = visualize_mesh(renderer, 
+                                                batch_visual_imgs[0], 
+                                                pred_vertices[0].detach(), 
+                                                pred_camera.detach())
 
-        visual_imgs_output = visualize_mesh(renderer, 
-                                            batch_visual_imgs[0], 
-                                            pred_vertices[0].detach(), 
-                                            pred_camera.detach())
+            visual_imgs = visual_imgs_output.transpose(1,2,0)
+            visual_imgs = np.asarray(visual_imgs)
 
-        visual_imgs = visual_imgs_output.transpose(1,2,0)
-        visual_imgs = np.asarray(visual_imgs)
-
-    return visual_imgs[:,:,::-1], pred_3d_joints_from_mesh.cpu().numpy()[0], angle_index_middle
+            return visual_imgs[:,:,::-1], joints_xyz
+        else:
+            return None, joints_xyz
 
 def visualize_mesh( renderer, images,
                     pred_vertices_full,

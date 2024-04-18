@@ -31,18 +31,16 @@ if __name__ == '__main__':
             break
 
         # real-time inference
-        visual_imgs, joints_xyz, angle_index_middle = inference(frame, _model, mano_model, renderer, mesh_sampler)
-        # send data
-        # try:
-        #     data = joints_pos.tobytes()
-        #     conn.send(data)  # 发送序列化的数组
-        #     print(f"Sent array: {joints_pos}")
-        # # except socket.error as e:
-        #     # print("Client disconnected or error:", e)
-        # except socket.timeout:
-        #     print("Timeout")
-        # finally:
-        #     conn.close()
+        visual_imgs, joints_xyz = inference(frame, _model, mano_model, renderer, mesh_sampler)
+
+        # get angle between index and middle finger
+        index_vec = joints_xyz[8] - joints_xyz[5]
+        middle_vec = joints_xyz[12] - joints_xyz[9]
+        # get degree between index and middle finger
+        dot = np.dot(index_vec, middle_vec)
+        norm = np.linalg.norm(index_vec) * np.linalg.norm(middle_vec)
+        cos = dot / norm
+        angle_index_middle = np.degrees(np.arccos(cos))
 
         try:
             array = joints_xyz[8].tolist() # index finger tip joint
