@@ -4,14 +4,14 @@ from torch import nn
 import numpy as np
 import torch
 
-data = np.load('./datasets/motion_datasets.npz')
+data = np.load('./datasets/same/motion_datasets.npz')
 sequences, labels = data['sequences'], data['labels']
 print(sequences.shape, labels.shape)
 
 # Initialize the model with LSTM parameters
 hidden_dim = 64
 num_layers = 2
-batch_size = 15
+batch_size = 256
 learning_rate = 0.001
 epochs = 1000
 
