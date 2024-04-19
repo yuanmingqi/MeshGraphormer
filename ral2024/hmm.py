@@ -3,7 +3,8 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 num_joints = 21
-num_classes = 3
+motion_labels = ['keep', 'come', 'back', 'stop', 'ring']
+num_classes = len(motion_labels)
 
 class HandGestureModel(nn.Module):
     def __init__(self, num_joints, num_classes, hidden_dim, num_layers):

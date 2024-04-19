@@ -2,7 +2,7 @@ import cv2
 import datetime
 import numpy as np
 
-from ral.realtime import build_model, inference, parse_args
+from ral2024.realtime import build_model, inference, parse_args
 
 # 0: come here
 # 1: stop 
