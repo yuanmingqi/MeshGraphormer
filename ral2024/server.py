@@ -53,7 +53,7 @@ def motion_process(joints_xyz):
 
     # socket
     host = '192.168.1.1'
-    port = 5000
+    port = 5001
     server_socket = socket.socket()
     server_socket.bind((host, port))
     server_socket.listen(2)
@@ -73,21 +73,23 @@ def motion_process(joints_xyz):
 
     while True:
         # motion recognition
-        seq_placeholder[count % seq_length] = joints_xyz.get().flatten()
+        joints_xyz_data = joints_xyz.get()
+        seq_placeholder[count % seq_length] = joints_xyz_data.flatten()
         pred_class, probs = real_time_prediction(model, seq_placeholder)
         if probs[pred_class] > threshold:
             print(count, motion_labels[pred_class], probs)
 
-        # # send data
-        # try:
-        #     array = joints_xyz[8].tolist() # index finger tip joint
-        #     array.append(angle_index_middle)
-        #     array = np.array(array).astype(np.float32)
-        #     data = array.tobytes()
-        #     conn.send(data)  # 发送序列化的数组
-        #     print(f"Sent array: {array}")
-        # except socket.timeout:
-        #     pass
+        # send data
+        try:
+            array = joints_xyz_data[8].tolist() # index finger tip joint
+            array.append(90.0)
+            array.append(pred_class)
+            array = np.array(array).astype(np.float32)
+            data = array.tobytes()
+            conn.send(data)  # 发送序列化的数组
+            print(f"Sent array: {array}")
+        except socket.timeout:
+            pass
 
         # time step
         count += 1
