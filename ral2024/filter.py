@@ -70,3 +70,41 @@ class MovingAverage:
         self.window.append(new_value)
         self.sum += new_value
         return self.sum / len(self.window)
+
+from collections import deque
+
+class IntentionFilter:
+    def __init__(self, maxlen):
+        # 初始化一个双端队列，最大长度为10
+        self.predictions = deque(maxlen=maxlen)
+
+    def add_prediction(self, prediction):
+        """
+        添加一个新的预测到队列中，并检查是否有连续10个相同的预测结果。
+        如果有，则返回该结果；如果没有有效结果，返回一个特定的错误识别码。
+        """
+        # 添加新的预测到队列
+        if len(self.predictions) == 0 or self.predictions[-1] != prediction:
+            # 如果最新预测与队列中的最后一个不同，重置队列
+            self.predictions.clear()
+        
+        self.predictions.append(prediction)
+
+        # 检查队列是否已满，并且所有元素都相同
+        if len(self.predictions) == 10 and all(p == self.predictions[0] for p in self.predictions):
+            return prediction
+        
+        # 如果没有有效的结果，返回错误识别码
+        return 7777
+
+# # 示例使用
+# predictor = IntentPredictor()
+# results = ['intent1', 'intent2', 'intent1', 'intent1', 'intent1', 'intent1', 'intent1', 'intent1', 'intent1', 'intent1']
+
+# # 模拟预测数据流
+# for result in results:
+#     confirmed_result = predictor.add_prediction(result)
+#     if confirmed_result != "NO_VALID_RESULT":
+#         print(f"有效的预测结果是: {confirmed_result}")
+#     else:
+#         print("当前没有有效的预测结果。")

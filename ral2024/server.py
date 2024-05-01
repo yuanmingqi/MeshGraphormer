@@ -7,6 +7,7 @@ import socket
 
 from ral2024.hmm import HandGestureModel, num_joints, num_classes, motion_labels
 from ral2024.realtime import build_model, inference, parse_args
+from ral2024.filter import IntentionFilter, MovingAverage
 
 def mesh_process(joints_xyz):
     # arguments
@@ -53,7 +54,7 @@ def motion_process(joints_xyz):
 
     # socket
     host = '192.168.1.1'
-    port = 5001
+    port = 5000
     server_socket = socket.socket()
     server_socket.bind((host, port))
     server_socket.listen(2)
@@ -71,18 +72,38 @@ def motion_process(joints_xyz):
     seq_placeholder = np.zeros((seq_length, num_joints * 3))
     count = 0
 
+    # intention filter
+    intention_filter = IntentionFilter(maxlen=10)
+    # moving average
+    angle_ma = MovingAverage(window_size=10)
+
     while True:
-        # motion recognition
         joints_xyz_data = joints_xyz.get()
+        # motion recognition
         seq_placeholder[count % seq_length] = joints_xyz_data.flatten()
         pred_class, probs = real_time_prediction(model, seq_placeholder)
         if probs[pred_class] > threshold:
             print(count, motion_labels[pred_class], probs)
+            pred_class = intention_filter.add_prediction(pred_class)
+        else:
+            pred_class = intention_filter.add_prediction(np.random.randint(num_classes+1, num_classes+100))
+
+        # get angle between index and middle fingers
+        index_vec = joints_xyz_data[8] - joints_xyz_data[5]
+        middle_vec = joints_xyz_data[12] - joints_xyz_data[9]
+        dot = np.dot(index_vec, middle_vec)
+        norm = np.linalg.norm(index_vec) * np.linalg.norm(middle_vec)
+        cos = dot / norm
+        angle_index_middle = np.degrees(np.arccos(cos))
+        # apply moving average
+        angle_index_middle = angle_ma.update(angle_index_middle)
+        # clip the angle
+        angle_index_middle = np.clip(angle_index_middle-7, 0, 29)
 
         # send data
         try:
             array = joints_xyz_data[8].tolist() # index finger tip joint
-            array.append(90.0)
+            array.append(angle_index_middle)
             array.append(pred_class)
             array = np.array(array).astype(np.float32)
             data = array.tobytes()
