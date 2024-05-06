@@ -1,20 +1,20 @@
-from ral2024.hmm import SequenceHandDataset, HandGestureModel, num_classes, num_joints
+from hmm import SequenceHandDataset, HandGestureModel, num_classes, num_joints
 from torch.utils.data import DataLoader
 from torch import nn
 import numpy as np
 import torch
 
 person = 'ymq'
-data = np.load(f'./datasets/{person}/processed_data.npz')
+data = np.load(f'../datasets/{person}/processed_data.npz')
 sequences, labels = data['sequences'], data['labels']
 print(sequences.shape, labels.shape)
 
 # Initialize the model with LSTM parameters
 hidden_dim = 64
 num_layers = 2
-batch_size = 512    
-learning_rate = 0.001
-epochs = 1000
+batch_size = 256    
+learning_rate = 0.0001
+epochs = 100
 
 dataset = SequenceHandDataset(sequences, labels)
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -37,4 +37,4 @@ model = HandGestureModel(num_joints, num_classes, hidden_dim, num_layers)
 
 # Train the model
 train_model(model, dataloader, epochs=epochs)
-torch.save(model.state_dict(), f'./models/hmm_{person}.pth')
+# torch.save(model.state_dict(), f'./models/hmm_{person}.pth')
